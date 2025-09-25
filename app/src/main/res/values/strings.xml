@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">NamiDtvbt2Example</string>
+    <string name="str_play">Play</string>
+    <string name="str_stop">Stop</string>
+</resources>
