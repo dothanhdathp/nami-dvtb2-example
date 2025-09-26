@@ -2,8 +2,8 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE    := gstreamer_jni
-LOCAL_SRC_FILES := gstreamer_jni.c
+LOCAL_MODULE    := dvbt2_sender
+LOCAL_SRC_FILES := dvbt2_sender.c
 LOCAL_SHARED_LIBRARIES := gstreamer_android
 LOCAL_LDLIBS := -llog -landroid
 include $(BUILD_SHARED_LIBRARY)

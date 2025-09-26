@@ -13,20 +13,54 @@ import android.widget.Toast
 import android.Manifest
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import org.freedesktop.gstreamer.GStreamer.init
+import org.freedesktop.gstreamer.GStreamer
+import nami.example.dtvbt2.DvbSenderManager
 
-class MainActivity : Activity(), SurfaceHolder.Callback {
-    private external fun nativeInit() // Initialize native code, build pipeline, etc
-    private external fun nativeFinalize() // Destroy pipeline and shutdown native code
-    private external fun nativePlay() // Set pipeline to PLAYING
-    private external fun nativePause() // Set pipeline to PAUSED
-    private external fun nativeSurfaceInit(surface: Any)
-    private external fun nativeSurfaceFinalize()
-    private val nativeCustomData: Long = 0 // Native code will use this to keep private data
+class MainActivity : Activity(), DvbSenderManagerCallback {
     private var isPlayingDesired = false // Whether the user asked to go to PLAYING
+    private val TAG: String = "MainActivity" // Whether the user asked to go to PLAYING"
+    private val SURFACE_FMMW: Int = 0 // Native, always exist
+    private val SURFACE_DW: Int = 1
+
+    // Callback for SurfaceView 1
+    val srfcb_fmmd = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            Log.d("SurfaceView1", "Surface created")
+            // Initialize rendering or GStreamer pipeline here
+        }
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            Log.d("SurfaceView1", "Surface changed")
+            dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            Log.d("SurfaceView1", "Surface destroyed")
+            dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
+        }
+    }
+
+    // Callback for SurfaceView 2
+    val srfcb_dw = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            Log.d("SurfaceView2", "Surface created")
+            // Initialize second rendering or GStreamer pipeline here
+        }
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            Log.d("SurfaceView2", "Surface changed")
+            dvbSenderManager.setSurface(SURFACE_DW, holder, format, width, height)
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            Log.d("SurfaceView2", "Surface destroyed")
+            dvbSenderManager.surfaceFinalize(SURFACE_DW)
+        }
+    }
 
     // Check Camera Permission
     private val CAMERA_PERMISSION_CODE = 100
+    private val dvbSenderManager: DvbSenderManager = DvbSenderManager(this)
 
     private fun checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -59,7 +93,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun startCamera() {
         // Your camera logic here
-        nativeInit()
+        dvbSenderManager.init();
     }
 
     //*-----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -69,96 +103,85 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
         // Initialize GStreamer and warn if it fails
         try {
-            init(this)
+            GStreamer.init(this)
         } catch (e: Exception) {
             Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
             finish()
             return
         }
 
+        checkCameraPermission()
+
         setContentView(R.layout.activity_main)
         val play = findViewById<View>(R.id.button_play) as ImageButton
         play.setOnClickListener {
-            isPlayingDesired = true
-            nativePlay()
+            dvbSenderManager.handlePlay()
         }
         val pause = findViewById<View>(R.id.button_stop) as ImageButton
         pause.setOnClickListener {
             isPlayingDesired = false
-            nativePause()
+            dvbSenderManager.handlePause()
         }
-        val sv = findViewById<View>(R.id.surface_video) as SurfaceView
-        val sh = sv.holder
-        sh.addCallback(this)
+
+        val sv_dw = findViewById<View>(R.id.surface_dw) as SurfaceView
+        val sv_fmmd = findViewById<View>(R.id.surface_fmmd) as SurfaceView
+        sv_dw.holder.addCallback(srfcb_dw)
+        sv_fmmd.holder.addCallback(srfcb_fmmd)
+
         if (savedInstanceState != null) {
             isPlayingDesired = savedInstanceState.getBoolean("playing")
-            Log.i("GStreamer", "Activity created. Saved state is playing:$isPlayingDesired")
+            Log.i(TAG, "Activity created. Saved state is playing:$isPlayingDesired")
         } else {
             isPlayingDesired = false
-            Log.i("GStreamer", "Activity created. There is no saved state, playing: false")
+            Log.i(TAG, "Activity created. There is no saved state, playing: false")
         }
 
         // Start with disabled buttons, until native code is initialized
         findViewById<View>(R.id.button_play).isEnabled = false
         findViewById<View>(R.id.button_stop).isEnabled = false
-        checkCameraPermission()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        Log.d("GStreamer", "Saving state, playing:$isPlayingDesired")
+        Log.d(TAG, "Saving state, playing:$isPlayingDesired")
         outState.putBoolean("playing", isPlayingDesired)
     }
 
     override fun onDestroy() {
-        nativeFinalize()
+        dvbSenderManager.finalize()
         super.onDestroy()
     }
 
-    // Called from native code. This sets the content of the TextView from the UI thread.
-    private fun setMessage(message: String) {
+//    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+//        dvbSenderManager.setSurface(holder, format, width, height)
+//    }
+//
+//    override fun surfaceCreated(holder: SurfaceHolder) {
+//        Log.d(TAG, "Surface created: " + holder.surface)
+//        // Then ???
+//    }
+//
+//    override fun surfaceDestroyed(holder: SurfaceHolder) {
+//        Log.d(TAG, "Surface destroyed")
+//        dvbSenderManager.surfaceFinalize()
+//    }
+
+    // Callback from DvbSenderManager
+    override fun setMessage(message: String) {
         val tv = findViewById<View>(R.id.textview_message) as TextView
         runOnUiThread { tv.text = message }
     }
 
-    // Called from native code. Native code calls this once it has created its pipeline and
-    // the main loop is running, so it is ready to accept commands.
-    private fun onGStreamerInitialized() {
-        Log.i("GStreamer", "Gst initialized. Restoring state, playing:$isPlayingDesired")
-        // Re-enable buttons, now that GStreamer is initialized
-        val activity: Activity = this
-        runOnUiThread {
-            activity.findViewById<View>(R.id.button_play).isEnabled = true
-            activity.findViewById<View>(R.id.button_stop).isEnabled = true
-        }
+    override fun dvbtInitialized() {
+        // Enable button
+        Log.d(TAG, "dvbtInitialized")
+        findViewById<View>(R.id.button_play).isEnabled = true
+        findViewById<View>(R.id.button_stop).isEnabled = true
+        dvbSenderManager.handlePlay()
     }
 
-    override fun surfaceChanged(
-        holder: SurfaceHolder, format: Int, width: Int,
-        height: Int
-    ) {
-        Log.d(
-            "GStreamer", "Surface changed to format " + format + " width " + width + " height " + height
-        )
-        nativeSurfaceInit(holder.surface)
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        Log.d("GStreamer", "Surface created: " + holder.surface)
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.d("GStreamer", "Surface destroyed")
-        nativeSurfaceFinalize()
-    }
-
-    companion object {
-        @JvmStatic
-        private external fun nativeClassInit(): Boolean // Initialize native class: cache Method IDs for callbacks
-
-        init {
-            System.loadLibrary("gstreamer_android")
-            System.loadLibrary("gstreamer_jni")
-            nativeClassInit()
-        }
+    override fun dvbtTerminated() {
+        // Disable button
+        findViewById<View>(R.id.button_play).isEnabled = false
+        findViewById<View>(R.id.button_stop).isEnabled = false
     }
 }
