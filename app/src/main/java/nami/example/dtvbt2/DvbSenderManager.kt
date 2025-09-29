@@ -6,12 +6,6 @@ import android.view.SurfaceHolder
 import android.view.View
 import android.widget.TextView
 
-interface DvbSenderManagerCallback {
-    fun setMessage(message: String)
-    fun dvbtInitialized()
-    fun dvbtTerminated()
-}
-
 class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private val TAG = "DvbSenderManager"
 
@@ -31,7 +25,7 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
 
     // Directly call form UI
     fun setSurface(id: Int, holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        Log.d("GStreamer", "Surface " + id + " changed to format " + format + " width " + width + " height " + height)
+        Log.d("GStreamer", "Surface $id changed to format $format width $width height $height")
         nativeSurfaceInit(id, holder.surface)
     }
 
@@ -64,15 +58,16 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
      * Called from native code. This sets the content of the TextView from the UI thread.
     */
     private fun setMessage(message: String) {
-        callback.setMessage(message)
+        Log.i(TAG, "Got messaged $message")
+        callback.onCallBack(DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE, message)
     }
 
     // the main loop is running, so it is ready to accept commands.
     private fun onGStreamerInitialized() {
-        Log.i("GStreamer", "Gst initialized. Restoring state, playing: ???")
+        Log.i(TAG, "Gst initialized. Restoring state, playing: ???")
         // Re-enable buttons, now that GStreamer is initialized
-        callback.dvbtInitialized()
-        dvbt_ready = true
+        dvbt_ready = true;
+        callback.onCallBack(DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED)
     }
 
     companion object {

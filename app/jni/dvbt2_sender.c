@@ -122,6 +122,9 @@ static void check_initialization_complete (CustomData * data)
         (*env)->CallVoidMethod (env, data->app, on_gstreamer_initialized_method_id);
         if ((*env)->ExceptionCheck (env)) {
             GST_ERROR ("Failed to call Java method");
+            GST_DEBUG ("Check JNI Method: custom_data_field_id               = %p", custom_data_field_id);
+            GST_DEBUG ("Check JNI Method: set_message_method_id              = %p", set_message_method_id);
+            GST_DEBUG ("Check JNI Method: on_gstreamer_initialized_method_id = %p", on_gstreamer_initialized_method_id);
             (*env)->ExceptionClear (env);
         }
         data->initialized = TRUE;

@@ -65,9 +65,11 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
     "tee name=t " \
     /* DW preview branch: small, leaky queue keeps UI responsive */ \
     "t. ! queue name=tee1 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "videoflip method=clockwise ! " \
     "glimagesink name=vsink1 " \
     /* FMMD preview branch: same idea */ \
     "t. ! queue name=tee2 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "videoflip method=clockwise ! " \
     "glimagesink name=vsink2"
 
 /* Define for Table */

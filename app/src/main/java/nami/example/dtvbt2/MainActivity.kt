@@ -14,48 +14,29 @@ import android.Manifest
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.freedesktop.gstreamer.GStreamer
-import nami.example.dtvbt2.DvbSenderManager
+import nami.example.dtvbt2.DvbSenderManagerCallback
 
-class MainActivity : Activity(), DvbSenderManagerCallback {
+class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallback {
     private var isPlayingDesired = false // Whether the user asked to go to PLAYING
     private val TAG: String = "MainActivity" // Whether the user asked to go to PLAYING"
     private val SURFACE_FMMW: Int = 0 // Native, always exist
     private val SURFACE_DW: Int = 1
+    private var allowed_camera: Boolean = false
 
-    // Callback for SurfaceView 1
-    val srfcb_fmmd = object : SurfaceHolder.Callback {
-        override fun surfaceCreated(holder: SurfaceHolder) {
-            Log.d("SurfaceView1", "Surface created")
-            // Initialize rendering or GStreamer pipeline here
-        }
 
-        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-            Log.d("SurfaceView1", "Surface changed")
-            dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
-        }
-
-        override fun surfaceDestroyed(holder: SurfaceHolder) {
-            Log.d("SurfaceView1", "Surface destroyed")
-            dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
-        }
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        Log.d("SurfaceView1", "Surface created")
+        // Initialize rendering or GStreamer pipeline here
     }
 
-    // Callback for SurfaceView 2
-    val srfcb_dw = object : SurfaceHolder.Callback {
-        override fun surfaceCreated(holder: SurfaceHolder) {
-            Log.d("SurfaceView2", "Surface created")
-            // Initialize second rendering or GStreamer pipeline here
-        }
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        Log.d("SurfaceView1", "Surface changed")
+        dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
+    }
 
-        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-            Log.d("SurfaceView2", "Surface changed")
-            dvbSenderManager.setSurface(SURFACE_DW, holder, format, width, height)
-        }
-
-        override fun surfaceDestroyed(holder: SurfaceHolder) {
-            Log.d("SurfaceView2", "Surface destroyed")
-            dvbSenderManager.surfaceFinalize(SURFACE_DW)
-        }
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        Log.d("SurfaceView1", "Surface destroyed")
+        dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
     }
 
     // Check Camera Permission
@@ -93,7 +74,7 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
 
     private fun startCamera() {
         // Your camera logic here
-        dvbSenderManager.init();
+        allowed_camera = true
     }
 
     //*-----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -123,10 +104,8 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
             dvbSenderManager.handlePause()
         }
 
-        val sv_dw = findViewById<View>(R.id.surface_dw) as SurfaceView
-        val sv_fmmd = findViewById<View>(R.id.surface_fmmd) as SurfaceView
-        sv_dw.holder.addCallback(srfcb_dw)
-        sv_fmmd.holder.addCallback(srfcb_fmmd)
+        val sv = findViewById<View>(R.id.surface_fmmd) as SurfaceView
+        sv.holder.addCallback(this)
 
         if (savedInstanceState != null) {
             isPlayingDesired = savedInstanceState.getBoolean("playing")
@@ -137,8 +116,11 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         }
 
         // Start with disabled buttons, until native code is initialized
-        findViewById<View>(R.id.button_play).isEnabled = false
-        findViewById<View>(R.id.button_stop).isEnabled = false
+        findViewById<View>(R.id.button_play).isEnabled = true
+        findViewById<View>(R.id.button_stop).isEnabled = true
+
+        if(allowed_camera)
+            dvbSenderManager.init();
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -151,37 +133,25 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         super.onDestroy()
     }
 
-//    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-//        dvbSenderManager.setSurface(holder, format, width, height)
-//    }
-//
-//    override fun surfaceCreated(holder: SurfaceHolder) {
-//        Log.d(TAG, "Surface created: " + holder.surface)
-//        // Then ???
-//    }
-//
-//    override fun surfaceDestroyed(holder: SurfaceHolder) {
-//        Log.d(TAG, "Surface destroyed")
-//        dvbSenderManager.surfaceFinalize()
-//    }
-
-    // Callback from DvbSenderManager
-    override fun setMessage(message: String) {
-        val tv = findViewById<View>(R.id.textview_message) as TextView
-        runOnUiThread { tv.text = message }
-    }
-
-    override fun dvbtInitialized() {
-        // Enable button
-        Log.d(TAG, "dvbtInitialized")
-        findViewById<View>(R.id.button_play).isEnabled = true
-        findViewById<View>(R.id.button_stop).isEnabled = true
-        dvbSenderManager.handlePlay()
-    }
-
-    override fun dvbtTerminated() {
-        // Disable button
-        findViewById<View>(R.id.button_play).isEnabled = false
-        findViewById<View>(R.id.button_stop).isEnabled = false
+    override fun onCallBack(e: DvbSenderManagerCallback.dvbt_event, message: String?) {
+        when (e) {
+             DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED -> {
+                 // findViewById<View>(R.id.button_play).isEnabled = true
+                 // findViewById<View>(R.id.button_stop).isEnabled = true
+                 Log.i(TAG, "onCallBack: ${e.toString()}")
+             }
+             DvbSenderManagerCallback.dvbt_event.DVBT_TERMINATED -> {
+                 // findViewById<View>(R.id.button_play).isEnabled = false
+                 // findViewById<View>(R.id.button_stop).isEnabled = false
+                 Log.i(TAG, "onCallBack: ${e.toString()}")
+             }
+             DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE -> {
+                 val tv = findViewById<View>(R.id.textview_message) as TextView
+                 runOnUiThread { tv.text = message }
+             }
+             else -> {
+                Log.i(TAG, "onCallBack (Unknown): ${e.toString()}")
+             }
+        }
     }
 }
