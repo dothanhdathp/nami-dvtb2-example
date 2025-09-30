@@ -7,5 +7,5 @@ interface DvbSenderManagerCallback {
         DVBT_TERMINATED,
         DVBT_COMMON_MESSAGE,
     }
-    fun onCallBack(e: dvbt_event, message: String? = null)
+    fun handleDvbEvent(e: dvbt_event, message: String? = null)
 }

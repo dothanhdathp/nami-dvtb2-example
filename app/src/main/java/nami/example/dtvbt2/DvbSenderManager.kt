@@ -8,6 +8,7 @@ import android.widget.TextView
 
 class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private val TAG = "DvbSenderManager"
+    private var mGstState: Int = -1
 
     private external fun nativeInit() // Initialize native code, build pipeline, etc
     private external fun nativeFinalize() // Destroy pipeline and shutdown native code
@@ -16,11 +17,9 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private external fun nativeSurfaceInit(id: Int, surface: Any)
     private external fun nativeSurfaceFinalize(id: Int)
     private val nativeCustomData: Long = 0 // Native code will use this to keep private data
-    private var dvbt_ready = false // Whether the user asked to go to PLAYING
 
     fun init() {
-        if(!dvbt_ready)
-            nativeInit()
+        nativeInit()
     }
 
     // Directly call form UI
@@ -34,24 +33,15 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     }
 
     fun finalize() {
-        // Phần này chắc là quyết định đóng hoàn toàn streamm hay không là do thằng này quyết định.
         nativeFinalize()
     }
 
     fun handlePlay() {
-        if(dvbt_ready) {
             nativePlay()
-        } else {
-            Log.d(TAG, "handlePlay: Wait module ready!")
-        }
     }
 
     fun handlePause() {
-        if(dvbt_ready) {
-            nativePause()
-        } else {
-            Log.d(TAG, "handlePause: Wait module ready!")
-        }
+        nativePause()
     }
 
     /* Native Call Back
@@ -59,15 +49,35 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     */
     private fun setMessage(message: String) {
         Log.i(TAG, "Got messaged $message")
-        callback.onCallBack(DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE, message)
+        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE, message)
     }
 
     // the main loop is running, so it is ready to accept commands.
     private fun onGStreamerInitialized() {
         Log.i(TAG, "Gst initialized. Restoring state, playing: ???")
-        // Re-enable buttons, now that GStreamer is initialized
-        dvbt_ready = true;
-        callback.onCallBack(DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED)
+        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED)
+    }
+
+    /**
+     * Defined enum value check in "gstelement.h", which corresponding to GStreamer state
+     * - GST_STATE_VOID_PENDING        = 0,
+     * - GST_STATE_NULL                = 1,
+     * - GST_STATE_READY               = 2,
+     * - GST_STATE_PAUSED              = 3,
+     * - GST_STATE_PLAYING             = 4
+        * - GST_STATE_UNKNOW           = -1 (not set or unknown)
+     */
+    private fun onGStreamerState(state: Int) {
+        // Convert to String state
+        var str_state: String = "GST_STATE_NULL"
+        when (state) {
+            0 -> str_state = "GST_STATE_VOID_PENDING"
+            1 -> str_state = "GST_STATE_NULL"
+            2 -> str_state = "GST_STATE_READY"
+            3 -> str_state = "GST_STATE_PAUSED"
+            4 -> str_state = "GST_STATE_PLAYING"
+        }
+        Log.i(TAG, "Gst state changed: $str_state")
     }
 
     companion object {

@@ -1,25 +1,12 @@
 #include "dvbt2_sender.h"
 
-/* Structure to contain all our information, so we can pass it to callbacks */
-typedef struct _CustomData
-{
-    jobject app;                  /* Application instance, used to call its methods. A global reference is kept. */
-    GstElement *pipeline;         /* The running pipeline */
-    GMainContext *context;        /* GLib context used to run the main loop */
-    GMainLoop *main_loop;         /* GLib main loop */
-    gboolean initialized;         /* To avoid informing the UI multiple times about the initialization */
-    Surface surface[SURFACE_MAX]; /* Application Surfaces List */
-    Tablet tablet[TABLET_ID_MAX];
-    gint connections_status;
-} CustomData;
-
 /* These global variables cache values which are not changing during execution */
 static pthread_t gst_app_thread;
 static pthread_key_t current_jni_env;
 static JavaVM *java_vm;
-static jfieldID custom_data_field_id;
-static jmethodID set_message_method_id;
-static jmethodID on_gstreamer_initialized_method_id;
+
+// static jmethodID set_message_method_id;
+// static jmethodID on_gstreamer_initialized_method_id;
 
 /*
  * Private methods
@@ -70,12 +57,24 @@ static void set_ui_message (const gchar * message, CustomData * data)
     JNIEnv *env = get_jni_env ();
     GST_DEBUG ("Setting message to: %s", message);
     jstring jmessage = (*env)->NewStringUTF (env, message);
-    (*env)->CallVoidMethod (env, data->app, set_message_method_id, jmessage);
+    (*env)->CallVoidMethod (env, data->app, Jmethod[METHOD_GST_MESSAGE], jmessage);
     if ((*env)->ExceptionCheck (env)) {
         GST_ERROR ("Failed to call Java method");
         (*env)->ExceptionClear (env);
     }
     (*env)->DeleteLocalRef (env, jmessage);
+}
+
+/* Change the ui state */
+static void set_ui_state (GstState state, CustomData * data)
+{
+    JNIEnv *env = get_jni_env ();
+    jint jstate = state;
+    (*env)->CallVoidMethod (env, data->app, Jmethod[METHOD_GST_STATE], jstate);
+    if ((*env)->ExceptionCheck (env)) {
+        GST_ERROR ("Failed to call Java method");
+        (*env)->ExceptionClear (env);
+    }
 }
 
 /* Retrieve errors from the bus and show them on the UI */
@@ -92,6 +91,7 @@ static void error_cb (GstBus * bus, GstMessage * msg, CustomData * data)
     set_ui_message (message_string, data);
     g_free (message_string);
     gst_element_set_state (data->pipeline, GST_STATE_NULL);
+    set_ui_state(GST_STATE_NULL, data);
 }
 
 /* Notify UI about pipeline state changes */
@@ -103,6 +103,7 @@ static void state_changed_cb (GstBus * bus, GstMessage * msg, CustomData * data)
     if (GST_MESSAGE_SRC (msg) == GST_OBJECT (data->pipeline)) {
         gchar *message = g_strdup_printf ("State changed to %s", gst_element_state_get_name (new_state));
         set_ui_message (message, data);
+        set_ui_state(new_state, data);
         g_free (message);
     }
 }
@@ -119,12 +120,8 @@ static void check_initialization_complete (CustomData * data)
         /* The main loop is running and we received a native window, inform the sink about it */
         gst_video_overlay_set_window_handle (GST_VIDEO_OVERLAY (data->surface[SURFACE_FMMW].video_sink), (guintptr) data->surface[SURFACE_FMMW].native_window);
 
-        (*env)->CallVoidMethod (env, data->app, on_gstreamer_initialized_method_id);
+        (*env)->CallVoidMethod (env, data->app, Jmethod[METHOD_GST_INITIALIZED]);
         if ((*env)->ExceptionCheck (env)) {
-            GST_ERROR ("Failed to call Java method");
-            GST_DEBUG ("Check JNI Method: custom_data_field_id               = %p", custom_data_field_id);
-            GST_DEBUG ("Check JNI Method: set_message_method_id              = %p", set_message_method_id);
-            GST_DEBUG ("Check JNI Method: on_gstreamer_initialized_method_id = %p", on_gstreamer_initialized_method_id);
             (*env)->ExceptionClear (env);
         }
         data->initialized = TRUE;
@@ -244,8 +241,7 @@ static void gst_native_play (JNIEnv * env, jobject thiz)
 }
 
 /* Set pipeline to PAUSED state */
-static void
-gst_native_pause (JNIEnv * env, jobject thiz)
+static void gst_native_pause (JNIEnv * env, jobject thiz)
 {
     CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
     if (!data)
@@ -258,17 +254,18 @@ gst_native_pause (JNIEnv * env, jobject thiz)
 static jboolean gst_native_class_init (JNIEnv * env, jclass klass)
 {
     custom_data_field_id = (*env)->GetFieldID (env, klass, "nativeCustomData", "J");
-    set_message_method_id = (*env)->GetMethodID (env, klass, "setMessage", "(Ljava/lang/String;)V");
-    on_gstreamer_initialized_method_id = (*env)->GetMethodID (env, klass, "onGStreamerInitialized", "()V");
 
-    if (!custom_data_field_id
-        || !set_message_method_id
-        || !on_gstreamer_initialized_method_id) {
-        /* We emit this message through the Android log instead of the GStreamer log because the later
-         * has not been initialized yet.
-         */
-        __android_log_print (ANDROID_LOG_ERROR, TAG, "The calling class does not implement all necessary interface methods");
-        return JNI_FALSE;
+    // Set callback method
+    Jmethod[METHOD_GST_MESSAGE] = (*env)->GetMethodID (env, klass, "setMessage", "(Ljava/lang/String;)V");
+    Jmethod[METHOD_GST_INITIALIZED] = (*env)->GetMethodID (env, klass, "onGStreamerInitialized", "()V");
+    Jmethod[METHOD_GST_STATE] = (*env)->GetMethodID (env, klass, "onGStreamerState", "(I)V");
+
+    // Check JNI method. If have at least one method which not avaible, return false
+    for(int i = 0; i < METHOD_ID_MAX; ++i) {
+        if(!Jmethod[i]) {
+            __android_log_print (ANDROID_LOG_ERROR, TAG, "The calling class does not implement all necessary interface methods");
+            return JNI_FALSE;
+        }
     }
     return JNI_TRUE;
 }
@@ -330,7 +327,10 @@ static void gst_native_surface_finalize (JNIEnv * env, jobject thiz, jint id)
     data->initialized = FALSE;
 }
 
-/* List of implemented native methods */
+
+/*
+ * List of implemented native methods
+ * */
 static JNINativeMethod native_methods[] = {
         {"nativeInit", "()V", (void *) gst_native_init},
         {"nativeFinalize", "()V", (void *) gst_native_finalize},
