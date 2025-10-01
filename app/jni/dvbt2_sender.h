@@ -60,44 +60,39 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
  */
 #define VSYNC_0 "vsink0"
 #define VSYNC_1 "vsink1"
+#define VALVE   "valve"
+#define MULTI_UDP_SINK "multi_udp_sink"
+#define BROADCAST_UDP_SINK "broadcast_udp_sink"
+
 #define PIPELINE_DESCRIPTION_NAMI_DVBT2_90 "ahcsrc ! " \
     /* Raise source framerate cap to 30fps (if camera supports it). */ \
     "video/x-raw,width=1280,height=720,framerate=30/1 ! "\
     "tee name=t " \
     /* FMMD preview branch: same idea */ \
-    "t. ! queue name=tee1 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "t. ! queue name=t0 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
     "videoflip method=clockwise ! " \
     "glimagesink name="VSYNC_0" " \
     /* DW preview branch: small, leaky queue keeps UI responsive */ \
-    "t. ! queue name=tee2 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "t. ! queue name=t1 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
     "videoflip method=clockwise ! " \
-    "glimagesink name="VSYNC_1
+    "glimagesink name="VSYNC_1" " \
+    /* Multi up sink for the registed ip address */ \
+    "t. ! queue name=t2 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "videoconvert ! x264enc tune=zerolatency ! rtph264pay ! multiudpsink name="MULTI_UDP_SINK" sync=true async=false " \
+    /* Broadcast to udp ip */ \
+    "t. ! queue name=t3 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
+    "valve name="VALVE" drop=true ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink name="BROADCAST_UDP_SINK
 
-/* Define for Table */
-// Id
-#define TABLET_ID_LEFT 0
-#define TABLET_ID_RIGHT 1
-#define TABLET_ID_CENTER 2
-#define TABLET_ID_MAX 3
 // GSurface
 #define SURFACE_FMMW 0
-#define SURFACE_DW 1
-#define SURFACE_MAX 2
+#define SURFACE_DW   1
+#define SURFACE_MAX  2
 // Connection
-#define CONNECTED_NONE          0b000
-#define CONNECTED_LEFT_TABLET   0b001
-#define CONNECTED_RIGHT_TABLET  0b010
-#define CONNECTED_CENTER_TABLET 0b100
-
-typedef struct _Tablet
-{
-    gint ip;
-    gint port;
-} Tablet;
 
 typedef struct _Surface {
     GstElement* video_sink;
     ANativeWindow* native_window;
+    bool active;
 } Surface;
 
 /* Structure to contain all our information, so we can pass it to callbacks */
@@ -109,9 +104,11 @@ typedef struct _CustomData
     GMainLoop *main_loop;         /* GLib main loop */
     gboolean initialized;         /* To avoid informing the UI multiple times about the initialization */
     Surface surface[SURFACE_MAX]; /* Application Surfaces List */
-    Tablet tablet[TABLET_ID_MAX];
-    gint connections_status;
+    GstElement *multi_udp_sink;
+    GstElement *broadcast_udp_sink;
+    GstElement *valve_trigger;
 } CustomData;
+
 /* Custom data pointer which will be save from application zone */
 static jfieldID custom_data_field_id;
 
@@ -130,6 +127,9 @@ static JNIEnv * get_jni_env (void);
 
 /* Change the content of the UI's TextView */
 static void set_ui_message (const gchar * message, CustomData * data);
+
+/* Change the ui state */
+static void set_ui_state (GstState state, CustomData * data);
 
 /* Change the ui state */
 static void set_ui_state (GstState state, CustomData * data);
@@ -168,6 +168,16 @@ static jboolean gst_native_class_init (JNIEnv * env, jclass klass);
 static void gst_native_surface_init (JNIEnv * env, jobject thiz, jint id, jobject surface);
 
 static void gst_native_surface_finalize (JNIEnv * env, jobject thiz, jint id);
+
+/* Change the ui state */
+static void gst_native_add_client (JNIEnv * env, jobject thiz, jstring ip, jint port);
+
+/* Change the ui state */
+static void gst_native_remove_client (JNIEnv * env, jobject thiz, jstring ip, jint port);
+
+static void gst_native_start_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port);
+
+static void gst_native_stop_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port);
 
 typedef enum _Method
 {

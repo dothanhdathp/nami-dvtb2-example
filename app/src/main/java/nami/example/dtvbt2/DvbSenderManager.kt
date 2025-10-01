@@ -8,7 +8,6 @@ import android.widget.TextView
 
 class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private val TAG = "DvbSenderManager"
-    private var mGstState: Int = -1
 
     private external fun nativeInit() // Initialize native code, build pipeline, etc
     private external fun nativeFinalize() // Destroy pipeline and shutdown native code
@@ -16,6 +15,11 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private external fun nativePause() // Set pipeline to PAUSED
     private external fun nativeSurfaceInit(id: Int, surface: Any)
     private external fun nativeSurfaceFinalize(id: Int)
+    private external fun nativeAddClient(ip: String, port: Int)
+    private external fun nativeRemoveClient(ip: String, port: Int)
+    private external fun nativeClearAllClient()
+    private external fun nativeStartBroadcast(ip: String, port: Int)
+    private external fun nativeStopBroadcast(ip: String, port: Int)
 
     private val nativeCustomData: Long = 0 // Native code will use this to keep private data
     private var mCameraEnabled: Boolean = false
@@ -58,6 +62,22 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
         nativePause()
     }
 
+    fun connectTablet(ip: String, port: Int) {
+        nativeAddClient(ip, port)
+    }
+
+    fun disconnectTablet(ip: String, port: Int) {
+        nativeRemoveClient(ip, port)
+    }
+
+    fun startBroadcast(ip: String, port: Int) {
+        nativeStartBroadcast(ip, port)
+    }
+
+    fun stopBroadcast(ip: String, port: Int) {
+        nativeStopBroadcast(ip, port)
+    }
+
     /* Native Call Back
      * Called from native code. This sets the content of the TextView from the UI thread.
     */
@@ -79,6 +99,10 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     }
 
     companion object {
+        // Define for meanning of screen id
+        const val SURFACE_FMMW = 0
+        const val SURFACE_DW   = 1
+
         @JvmStatic
         private external fun nativeClassInit(): Boolean // Initialize native class: cache Method IDs for callbacks
 

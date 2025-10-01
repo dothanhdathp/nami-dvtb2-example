@@ -2,4 +2,7 @@
     <string name="app_name">NamiDtvbt2Example</string>
     <string name="str_play">Play</string>
     <string name="str_stop">Stop</string>
+    <string name="str_dev_0">Device 0</string>
+    <string name="str_dev_1">Device 1</string>
+    <string name="str_dev_2">Device 2</string>
 </resources>

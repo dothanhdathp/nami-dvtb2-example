@@ -114,7 +114,7 @@ static void state_changed_cb (GstBus * bus, GstMessage * msg, CustomData * data)
 static void check_initialization_complete (CustomData * data)
 {
     JNIEnv *env = get_jni_env ();
-    if (!data->initialized && data->surface[SURFACE_FMMW].native_window && data->surface[SURFACE_DW].native_window && data->main_loop) {
+    if (!data->initialized && data->main_loop) {
         for(int id=SURFACE_FMMW; id<SURFACE_MAX; ++id) {
             if(data->surface[id].native_window) {
                 GST_DEBUG ("Initialization complete, notifying application. native_window:%p main_loop:%p", data->surface[id].native_window, data->main_loop);
@@ -161,11 +161,24 @@ static void * app_function (void *userdata)
         return NULL;
     }
 
+    /* Init Pipeline */
+    data->multi_udp_sink = gst_bin_get_by_name(GST_BIN(data->pipeline), MULTI_UDP_SINK);
+    // Initialize with a blank client list
+    g_object_set(G_OBJECT(data->multi_udp_sink), "clients", "", NULL);
+
+    data->valve_trigger = gst_bin_get_by_name(GST_BIN(data->pipeline), VALVE);
+    g_object_set(G_OBJECT(data->broadcast_udp_sink), "drop", "", TRUE);
+
+    data->broadcast_udp_sink = gst_bin_get_by_name(GST_BIN(data->pipeline), BROADCAST_UDP_SINK);
+    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", "", "port", 0, NULL);
+
+
     /* Set the pipeline to READY, so it can already accept a window handle, if we have one */
     gst_element_set_state (data->pipeline, GST_STATE_READY);
 
     // data->surface[SURFACE_FMMW].video_sink = gst_bin_get_by_interface (GST_BIN (data->pipeline), GST_TYPE_VIDEO_OVERLAY);
 
+    // TO DO: I want this can expand for any count of screnn which just need 'add' into this. But any way pls make it late. Another module still follow that kind.
     data->surface[SURFACE_FMMW].video_sink = gst_bin_get_by_name(GST_BIN (data->pipeline), VSYNC_0);
     data->surface[SURFACE_DW].video_sink = gst_bin_get_by_name(GST_BIN (data->pipeline), VSYNC_1);
 
@@ -197,6 +210,7 @@ static void * app_function (void *userdata)
     g_main_context_pop_thread_default (data->context);
     g_main_context_unref (data->context);
     gst_element_set_state (data->pipeline, GST_STATE_NULL);
+    gst_object_unref (data->surface[SURFACE_DW].video_sink);
     gst_object_unref (data->surface[SURFACE_FMMW].video_sink);
     gst_object_unref (data->pipeline);
 
@@ -261,6 +275,7 @@ static void gst_native_pause (JNIEnv * env, jobject thiz)
 /* Static class initializer: retrieve method and field IDs */
 static jboolean gst_native_class_init (JNIEnv * env, jclass klass)
 {
+    // Just save the data field CustomData to application context
     custom_data_field_id = (*env)->GetFieldID (env, klass, "nativeCustomData", "J");
 
     // Set callback method
@@ -335,18 +350,82 @@ static void gst_native_surface_finalize (JNIEnv * env, jobject thiz, jint id)
     data->initialized = FALSE;
 }
 
+static void gst_native_add_client (JNIEnv * env, jobject thiz, jstring ip, jint port)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
+    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "add", _ip, port);
+    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+}
+
+static void gst_native_remove_client (JNIEnv * env, jobject thiz, jstring ip, jint port)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
+    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "remove", _ip, port);
+    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+}
+
+/* Change the ui state */
+static void gst_native_clear_all_client (JNIEnv * env, jobject thiz)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "clear");
+}
+
+static void gst_native_start_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    // Set ip
+    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
+    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", _ip, "port", port, NULL);
+    // Enable stream (turn on)
+    g_object_set(G_OBJECT(data->valve_trigger), "drop", FALSE, NULL);
+    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+}
+
+static void gst_native_stop_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    // disable stream (turn off)
+    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
+    g_object_set(G_OBJECT(data->valve_trigger), "drop", TRUE, NULL);
+    // Remove ip addrest
+    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", _ip, "port", port, NULL);
+    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+}
 
 /*
  * List of implemented native methods
  * */
 static JNINativeMethod native_methods[] = {
-        {"nativeInit", "()V", (void *) gst_native_init},
-        {"nativeFinalize", "()V", (void *) gst_native_finalize},
-        {"nativePlay", "()V", (void *) gst_native_play},
-        {"nativePause", "()V", (void *) gst_native_pause},
-        {"nativeSurfaceInit", "(ILjava/lang/Object;)V", (void *) gst_native_surface_init},
-        {"nativeSurfaceFinalize", "(I)V", (void *) gst_native_surface_finalize},
-        {"nativeClassInit", "()Z", (void *) gst_native_class_init}
+    {"nativeInit", "()V", (void *) gst_native_init},
+    {"nativeFinalize", "()V", (void *) gst_native_finalize},
+    {"nativePlay", "()V", (void *) gst_native_play},
+    {"nativePause", "()V", (void *) gst_native_pause},
+    {"nativeSurfaceInit", "(ILjava/lang/Object;)V", (void *) gst_native_surface_init},
+    {"nativeSurfaceFinalize", "(I)V", (void *) gst_native_surface_finalize},
+    {"nativeClassInit", "()Z", (void *) gst_native_class_init},
+    {"nativeAddClient", "(Ljava/lang/String;I)V", (void *) gst_native_add_client},
+    {"nativeRemoveClient", "(Ljava/lang/String;I)V", (void *) gst_native_remove_client},
+    {"nativeClearAllClient", "()V", (void *) gst_native_clear_all_client},
+    {"nativeStartBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_start_broadcast},
+    {"nativeStopBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_stop_broadcast}
 };
 
 /* Library initializer */

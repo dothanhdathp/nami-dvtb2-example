@@ -11,6 +11,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import android.Manifest
+import android.widget.ToggleButton
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.freedesktop.gstreamer.GStreamer
@@ -19,9 +20,6 @@ import nami.example.dtvbt2.DvbSenderManagerCallback
 class MainActivity : Activity(), DvbSenderManagerCallback {
     private var isPlayingDesired = false // Whether the user asked to go to PLAYING
     private val TAG: String = "MainActivity" // Whether the user asked to go to PLAYING"
-    private val SURFACE_FMMW: Int = 0 // Native, always exist
-    private val SURFACE_DW: Int = 1
-    private var allowed_camera: Boolean = false
     private val CAMERA_PERMISSION_CODE = 100
     private val dvbSenderManager: DvbSenderManager = DvbSenderManager(this)
     private var mBtnPlay: ImageButton? = null;
@@ -65,6 +63,81 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
     }
 
     //*-----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+    private fun initButton() {
+        mBtnPlay = findViewById<View>(R.id.button_play) as ImageButton
+        mBtnPause = findViewById<View>(R.id.button_stop) as ImageButton
+        mBtnPlay?.setOnClickListener {
+            dvbSenderManager.callPlay()
+        }
+        mBtnPause?.setOnClickListener {
+            dvbSenderManager.callPause()
+        }
+
+        var btn_dev_0 = findViewById<View>(R.id.button_dev_0) as ToggleButton
+        btn_dev_0.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                dvbSenderManager.connectTablet("192.168.10.106", 5000)
+            } else {
+                dvbSenderManager.disconnectTablet("192.168.10.106", 5000)
+            }
+        }
+
+        /** Listen by:
+         * gst-launch-1.0 udpsrc port=5000 caps = "application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)H264" ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! autovideosink
+         */
+        var btn_dev_1 = findViewById<View>(R.id.button_dev_1) as ToggleButton
+        btn_dev_1.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                dvbSenderManager.connectTablet("192.168.10.105", 5000)
+            } else {
+                dvbSenderManager.disconnectTablet("192.168.10.105", 5000)
+            }
+        }
+
+        /** Listen by:
+         * gst-launch-1.0 udpsrc port=5000 ! application/x-rtp,media=video,clock-rate=90000,encoding-name=H264 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! autovideosink
+         */
+        var btn_dev_2 = findViewById<View>(R.id.button_dev_2) as ToggleButton
+        btn_dev_2.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                dvbSenderManager.startBroadcast("192.168.10.255", 5000)
+            } else {
+                dvbSenderManager.stopBroadcast("192.168.10.255", 5000)
+            }
+        }
+    }
+
+    private fun initSurfaceView() {
+        val svf = findViewById<View>(R.id.surface_fmmd) as SurfaceView
+        svf.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                // Handle size or format changes if needed
+                dvbSenderManager.setSurface(DvbSenderManager.SURFACE_FMMW, holder, format, width, height)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                dvbSenderManager.surfaceFinalize(DvbSenderManager.SURFACE_FMMW)
+            }
+        })
+        val svd = findViewById<View>(R.id.surface_dw) as SurfaceView
+        svd.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                // Handle size or format changes if needed
+                dvbSenderManager.setSurface(DvbSenderManager.SURFACE_DW, holder, format, width, height)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                dvbSenderManager.surfaceFinalize(DvbSenderManager.SURFACE_DW)
+            }
+        })
+    }
+
     // Called when the activity is first created.
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,45 +152,9 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         }
 
         checkCameraPermission()
-
         setContentView(R.layout.activity_main)
-        mBtnPlay = findViewById<View>(R.id.button_play) as ImageButton
-        mBtnPause = findViewById<View>(R.id.button_stop) as ImageButton
-        mBtnPlay?.setOnClickListener {
-            dvbSenderManager.callPlay()
-        }
-        mBtnPause?.setOnClickListener {
-            dvbSenderManager.callPause()
-        }
-
-        val svf = findViewById<View>(R.id.surface_fmmd) as SurfaceView
-        svf.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-            }
-
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                // Handle size or format changes if needed
-                dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
-            }
-
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
-            }
-        })
-        val svd = findViewById<View>(R.id.surface_dw) as SurfaceView
-        svd.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-            }
-
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                // Handle size or format changes if needed
-                dvbSenderManager.setSurface(SURFACE_DW, holder, format, width, height)
-            }
-
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                dvbSenderManager.surfaceFinalize(SURFACE_DW)
-            }
-        })
+        initButton()
+        initSurfaceView()
 
         if (savedInstanceState != null) {
             isPlayingDesired = savedInstanceState.getBoolean("playing")
@@ -179,6 +216,9 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
                         }
                         DvbSenderManagerCallback.GST_STATE_PLAYING -> {
                             // to do
+                        }
+                        else -> {
+                            // do nothing
                         }
                     }
                 }
