@@ -16,7 +16,7 @@ import androidx.core.content.ContextCompat
 import org.freedesktop.gstreamer.GStreamer
 import nami.example.dtvbt2.DvbSenderManagerCallback
 
-class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallback {
+class MainActivity : Activity(), DvbSenderManagerCallback {
     private var isPlayingDesired = false // Whether the user asked to go to PLAYING
     private val TAG: String = "MainActivity" // Whether the user asked to go to PLAYING"
     private val SURFACE_FMMW: Int = 0 // Native, always exist
@@ -26,20 +26,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallbac
     private val dvbSenderManager: DvbSenderManager = DvbSenderManager(this)
     private var mBtnPlay: ImageButton? = null;
     private var mBtnPause: ImageButton? = null;
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        Log.d("SurfaceView1", "Surface created")
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        Log.d("SurfaceView1", "Surface changed")
-        dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.d("SurfaceView1", "Surface destroyed")
-        dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
-    }
 
     // Check Camera Permission
 
@@ -73,8 +59,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallbac
     }
 
     private fun startCamera() {
-        // Your camera logic here
-        allowed_camera = true
+        // On camera allow access start dvbSenderManager
+        dvbSenderManager.setCamera(true)
+        dvbSenderManager.init();
     }
 
     //*-----------------------------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -97,14 +84,40 @@ class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallbac
         mBtnPlay = findViewById<View>(R.id.button_play) as ImageButton
         mBtnPause = findViewById<View>(R.id.button_stop) as ImageButton
         mBtnPlay?.setOnClickListener {
-            dvbSenderManager.handlePlay()
+            dvbSenderManager.callPlay()
         }
         mBtnPause?.setOnClickListener {
-            dvbSenderManager.handlePause()
+            dvbSenderManager.callPause()
         }
 
-        val sv = findViewById<View>(R.id.surface_fmmd) as SurfaceView
-        sv.holder.addCallback(this)
+        val svf = findViewById<View>(R.id.surface_fmmd) as SurfaceView
+        svf.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                // Handle size or format changes if needed
+                dvbSenderManager.setSurface(SURFACE_FMMW, holder, format, width, height)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                dvbSenderManager.surfaceFinalize(SURFACE_FMMW)
+            }
+        })
+        val svd = findViewById<View>(R.id.surface_dw) as SurfaceView
+        svd.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                // Handle size or format changes if needed
+                dvbSenderManager.setSurface(SURFACE_DW, holder, format, width, height)
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                dvbSenderManager.surfaceFinalize(SURFACE_DW)
+            }
+        })
 
         if (savedInstanceState != null) {
             isPlayingDesired = savedInstanceState.getBoolean("playing")
@@ -118,8 +131,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallbac
         mBtnPlay?.isEnabled = false
         mBtnPause?.isEnabled = false
 
-        if(allowed_camera)
-            dvbSenderManager.init();
+        dvbSenderManager.init();
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -132,24 +144,47 @@ class MainActivity : Activity(), SurfaceHolder.Callback, DvbSenderManagerCallbac
         super.onDestroy()
     }
 
-    override fun handleDvbEvent(e: DvbSenderManagerCallback.dvbt_event, message: String?) {
+    override fun handleDvbEvent(
+        e: DvbSenderManagerCallback.dvbt_event,
+        value: Int?,
+        message: String?
+    ) {
         runOnUiThread {
             when (e) {
-                 DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED -> {
-                     Log.i(TAG, "onCallBack: ${e.toString()}")
-                     mBtnPlay?.isEnabled = true
-                     mBtnPause?.isEnabled = true
-                 }
-                 DvbSenderManagerCallback.dvbt_event.DVBT_TERMINATED -> {
-                     Log.i(TAG, "onCallBack: ${e.toString()}")
-                 }
-                 DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE -> {
-                     val tv = findViewById<View>(R.id.textview_message) as TextView
-                     tv.text = message
-                 }
-                 else -> {
-                    Log.i(TAG, "onCallBack (Unknown): ${e.toString()}")
-                 }
+                DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED -> {
+                    Log.i(TAG, "onCallBack: ${e.toString()}")
+                    mBtnPlay?.isEnabled = true
+                    mBtnPause?.isEnabled = true
+                }
+                DvbSenderManagerCallback.dvbt_event.DVBT_TERMINATED -> {
+                    Log.i(TAG, "onCallBack: ${e.toString()}")
+                }
+                DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE -> {
+                    val tv = findViewById<View>(R.id.textview_message) as TextView
+                    tv.text = message
+                }
+                DvbSenderManagerCallback.dvbt_event.DVBT_ON_STATE -> {
+                    when(value) {
+                        DvbSenderManagerCallback.GST_STATE_VOID_PENDING -> {
+                            // to do
+                        }
+                        DvbSenderManagerCallback.GST_STATE_NULL -> {
+                            // to do
+                        }
+                        DvbSenderManagerCallback.GST_STATE_READY -> {
+                            dvbSenderManager.callPlay();
+                        }
+                        DvbSenderManagerCallback.GST_STATE_PAUSED -> {
+                            // to do
+                        }
+                        DvbSenderManagerCallback.GST_STATE_PLAYING -> {
+                            // to do
+                        }
+                    }
+                }
+                else -> {
+                   Log.i(TAG, "onCallBack (Unknown): ${e.toString()}")
+                }
             }
         }
     }

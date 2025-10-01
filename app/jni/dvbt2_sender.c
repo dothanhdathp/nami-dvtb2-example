@@ -114,17 +114,21 @@ static void state_changed_cb (GstBus * bus, GstMessage * msg, CustomData * data)
 static void check_initialization_complete (CustomData * data)
 {
     JNIEnv *env = get_jni_env ();
-    if (!data->initialized && data->surface[SURFACE_FMMW].native_window && data->main_loop) {
-        GST_DEBUG ("Initialization complete, notifying application. native_window:%p main_loop:%p", data->surface[SURFACE_FMMW].native_window, data->main_loop);
-
-        /* The main loop is running and we received a native window, inform the sink about it */
-        gst_video_overlay_set_window_handle (GST_VIDEO_OVERLAY (data->surface[SURFACE_FMMW].video_sink), (guintptr) data->surface[SURFACE_FMMW].native_window);
-
-        (*env)->CallVoidMethod (env, data->app, Jmethod[METHOD_GST_INITIALIZED]);
-        if ((*env)->ExceptionCheck (env)) {
-            (*env)->ExceptionClear (env);
+    if (!data->initialized && data->surface[SURFACE_FMMW].native_window && data->surface[SURFACE_DW].native_window && data->main_loop) {
+        for(int id=SURFACE_FMMW; id<SURFACE_MAX; ++id) {
+            if(data->surface[id].native_window) {
+                GST_DEBUG ("Initialization complete, notifying application. native_window:%p main_loop:%p", data->surface[id].native_window, data->main_loop);
+                gst_video_overlay_set_window_handle (GST_VIDEO_OVERLAY (data->surface[id].video_sink), (guintptr) data->surface[id].native_window);
+            }
+            data->initialized = TRUE;
         }
-        data->initialized = TRUE;
+
+        if(data->initialized) {
+            (*env)->CallVoidMethod (env, data->app, Jmethod[METHOD_GST_INITIALIZED]);
+            if ((*env)->ExceptionCheck (env)) {
+                (*env)->ExceptionClear (env);
+            }
+        }
     } else {
         GST_DEBUG ("Initialization failed [%d][%d][%d]", data->initialized, data->surface[SURFACE_FMMW].native_window, data->main_loop);
     }
@@ -160,8 +164,12 @@ static void * app_function (void *userdata)
     /* Set the pipeline to READY, so it can already accept a window handle, if we have one */
     gst_element_set_state (data->pipeline, GST_STATE_READY);
 
-    data->surface[SURFACE_FMMW].video_sink = gst_bin_get_by_interface (GST_BIN (data->pipeline), GST_TYPE_VIDEO_OVERLAY);
-    if (!data->surface[SURFACE_FMMW].video_sink) {
+    // data->surface[SURFACE_FMMW].video_sink = gst_bin_get_by_interface (GST_BIN (data->pipeline), GST_TYPE_VIDEO_OVERLAY);
+
+    data->surface[SURFACE_FMMW].video_sink = gst_bin_get_by_name(GST_BIN (data->pipeline), VSYNC_0);
+    data->surface[SURFACE_DW].video_sink = gst_bin_get_by_name(GST_BIN (data->pipeline), VSYNC_1);
+
+    if (!data->surface[SURFACE_FMMW].video_sink && !data->surface[SURFACE_DW].video_sink) {
         GST_ERROR ("Could not retrieve video sink");
         return NULL;
     }

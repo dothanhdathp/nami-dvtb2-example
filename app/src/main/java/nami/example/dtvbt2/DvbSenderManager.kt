@@ -16,9 +16,23 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private external fun nativePause() // Set pipeline to PAUSED
     private external fun nativeSurfaceInit(id: Int, surface: Any)
     private external fun nativeSurfaceFinalize(id: Int)
+
     private val nativeCustomData: Long = 0 // Native code will use this to keep private data
+    private var mCameraEnabled: Boolean = false
+    private var mDabInited: Boolean = false
+    private var mDabState: Int = DvbSenderManagerCallback.GST_STATE_VOID_PENDING
+
+    // Set the preset condition value
+    fun setCamera(value: Boolean) {
+        mCameraEnabled = value
+    }
 
     fun init() {
+        if(!mCameraEnabled) {
+            Log.e(TAG, "init: Camera not allow to access!")
+            return
+        }
+        Log.e(TAG, "init: Init Suggest!")
         nativeInit()
     }
 
@@ -36,11 +50,11 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
         nativeFinalize()
     }
 
-    fun handlePlay() {
-            nativePlay()
+    fun callPlay() {
+        nativePlay()
     }
 
-    fun handlePause() {
+    fun callPause() {
         nativePause()
     }
 
@@ -48,36 +62,20 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
      * Called from native code. This sets the content of the TextView from the UI thread.
     */
     private fun setMessage(message: String) {
-        Log.i(TAG, "Got messaged $message")
-        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE, message)
+        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_COMMON_MESSAGE, null, message)
     }
 
     // the main loop is running, so it is ready to accept commands.
     private fun onGStreamerInitialized() {
-        Log.i(TAG, "Gst initialized. Restoring state, playing: ???")
-        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED)
+        mDabInited = true
+        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_INITIALIZED, null, null)
     }
 
-    /**
-     * Defined enum value check in "gstelement.h", which corresponding to GStreamer state
-     * - GST_STATE_VOID_PENDING        = 0,
-     * - GST_STATE_NULL                = 1,
-     * - GST_STATE_READY               = 2,
-     * - GST_STATE_PAUSED              = 3,
-     * - GST_STATE_PLAYING             = 4
-        * - GST_STATE_UNKNOW           = -1 (not set or unknown)
-     */
     private fun onGStreamerState(state: Int) {
         // Convert to String state
-        var str_state: String = "GST_STATE_NULL"
-        when (state) {
-            0 -> str_state = "GST_STATE_VOID_PENDING"
-            1 -> str_state = "GST_STATE_NULL"
-            2 -> str_state = "GST_STATE_READY"
-            3 -> str_state = "GST_STATE_PAUSED"
-            4 -> str_state = "GST_STATE_PLAYING"
-        }
-        Log.i(TAG, "Gst state changed: $str_state")
+        mDabState = state
+        Log.i(TAG, "onGStreamerState: $state - " + DvbSenderManagerCallback.gstStateToString(state))
+        callback.handleDvbEvent(DvbSenderManagerCallback.dvbt_event.DVBT_ON_STATE, state, null)
     }
 
     companion object {

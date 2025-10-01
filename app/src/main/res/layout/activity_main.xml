@@ -39,13 +39,24 @@
                 android:contentDescription="@string/str_stop"
                 android:src="@android:drawable/ic_media_pause"
                 android:text="@string/str_stop" />
-
         </LinearLayout>
-
-        <SurfaceView
-            android:id="@+id/surface_fmmd"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical|center_horizontal" />
+            android:gravity="center_horizontal"
+            android:orientation="horizontal"
+            android:weightSum="2">
+            <SurfaceView
+                android:id="@+id/surface_fmmd"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+            <SurfaceView
+                android:id="@+id/surface_dw"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -58,18 +58,20 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
  * Queue name for each tee is "tee1", "tee2"
  * Output for each sync is "vsink1", "vsink2"
  */
+#define VSYNC_0 "vsink0"
+#define VSYNC_1 "vsink1"
 #define PIPELINE_DESCRIPTION_NAMI_DVBT2_90 "ahcsrc ! " \
     /* Raise source framerate cap to 30fps (if camera supports it). */ \
     "video/x-raw,width=1280,height=720,framerate=30/1 ! "\
     "tee name=t " \
-    /* DW preview branch: small, leaky queue keeps UI responsive */ \
+    /* FMMD preview branch: same idea */ \
     "t. ! queue name=tee1 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
     "videoflip method=clockwise ! " \
-    "glimagesink name=vsink1 " \
-    /* FMMD preview branch: same idea */ \
+    "glimagesink name="VSYNC_0" " \
+    /* DW preview branch: small, leaky queue keeps UI responsive */ \
     "t. ! queue name=tee2 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
     "videoflip method=clockwise ! " \
-    "glimagesink name=vsink2"
+    "glimagesink name="VSYNC_1
 
 /* Define for Table */
 // Id
