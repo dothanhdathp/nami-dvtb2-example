@@ -20,6 +20,8 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
     private external fun nativeClearAllClient()
     private external fun nativeStartBroadcast(ip: String, port: Int)
     private external fun nativeStopBroadcast(ip: String, port: Int)
+    private external fun nativeStartVideoTest()
+    private external fun nativeStopVideoTest()
 
     private val nativeCustomData: Long = 0 // Native code will use this to keep private data
     private var mCameraEnabled: Boolean = false
@@ -42,7 +44,7 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
 
     // Directly call form UI
     fun setSurface(id: Int, holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        Log.d("GStreamer", "Surface $id changed to format $format width $width height $height")
+        Log.d(TAG, "Surface $id changed to format $format width $width height $height")
         nativeSurfaceInit(id, holder.surface)
     }
 
@@ -62,20 +64,39 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
         nativePause()
     }
 
-    fun connectTablet(ip: String, port: Int) {
-        nativeAddClient(ip, port)
+    fun connectTablet(ip: String?, port: Int) {
+        if (ip != null) {
+            nativeAddClient(ip, port)
+        }
     }
 
-    fun disconnectTablet(ip: String, port: Int) {
-        nativeRemoveClient(ip, port)
+    fun disconnectTablet(ip: String?, port: Int) {
+        if (ip != null) {
+            nativeRemoveClient(ip, port)
+        }
     }
 
-    fun startBroadcast(ip: String, port: Int) {
-        nativeStartBroadcast(ip, port)
+    fun startBroadcast(ip: String?, port: Int) {
+        if (ip != null) {
+            nativeAddClient(ip, port)
+        }
     }
 
     fun stopBroadcast(ip: String, port: Int) {
-        nativeStopBroadcast(ip, port)
+        nativeRemoveClient(ip, port)
+    }
+
+
+    fun startTestMode() {
+        // Remove all attached surface
+        Log.d(TAG, "=====start dvbT2SenderManager [TEST MODE]======")
+        nativeStartVideoTest()
+    }
+
+    fun stopTestMode() {
+        // Remove all attached surface
+        Log.d(TAG, "=====start dvbT2SenderManager [TEST MODE]======")
+        nativeStopVideoTest()
     }
 
     /* Native Call Back
@@ -102,6 +123,14 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
         // Define for meanning of screen id
         const val SURFACE_FMMW = 0
         const val SURFACE_DW   = 1
+        // Broadcast receiver handle
+        const val ACTION_ID_CALL_PLAY              = 1996
+        const val ACTION_ID_CALL_PAUSE             = 1997
+        const val ACTION_ID_CALL_ADD_TABLET        = 1998
+        const val ACTION_ID_CALL_REMOVE_TABLET     = 1999
+        const val ACTION_ID_CALL_BROADCAST         = 2000
+        const val ACTION_ID_CALL_ENABLE_VIDEOTEST  = 2001
+        const val ACTION_ID_CALL_DISABLE_VIDEOTEST = 2002
 
         @JvmStatic
         private external fun nativeClassInit(): Boolean // Initialize native class: cache Method IDs for callbacks
@@ -112,4 +141,6 @@ class DvbSenderManager(private val callback: DvbSenderManagerCallback) {
             nativeClassInit()
         }
     }
+
+
 }

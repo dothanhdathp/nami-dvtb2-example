@@ -11,12 +11,14 @@
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <gst/app/gstappsink.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <pthread.h>
-
+#include <unistd.h>
 
 GST_DEBUG_CATEGORY_STATIC (debug_category);
+
 #define GST_CAT_DEFAULT debug_category
 
 /*
@@ -24,6 +26,7 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
  * a jlong, which is always 64 bits, without warnings.
  */
 #if GLIB_SIZEOF_VOID_P == 8
+
 # define GET_CUSTOM_DATA(env, thiz, fieldID) (CustomData *)(*env)->GetLongField (env, thiz, fieldID)
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)data)
 #else
@@ -31,28 +34,7 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
 # define SET_CUSTOM_DATA(env, thiz, fieldID, data) (*env)->SetLongField (env, thiz, fieldID, (jlong)(jint)data)
 #endif
 
-/*
- * These macros belong to project, user define this
- */
 #define TAG "dvbt2_sender"
-#define PIPELINE_DESCRIPTION_EXAMPLE "ahcsrc ! video/x-raw,width=1280,height=720,framerate=30/1 ! videoflip method=clockwise ! glimagesink"
-#define PIPELINE_DESCRIPTION_EXAMPLE_90 "ahcsrc ! video/x-raw,width=1280,height=720,framerate=30/1 ! videoflip method=clockwise ! glimagesink"
-#define PIPELINE_DESCRIPTION_NAMI_DVBT2 "ahcsrc device=0 ! " \
-    /* Raise source framerate cap to 30fps (if camera supports it). */  \
-    "video/x-raw,width=1920,height=1080,framerate=30/1 ! "  \
-    "queue name=src_q max-size-buffers=6 max-size-bytes=0 max-size-time=0 ! "  \
-    "tee name=t "  \
-    /* DW preview branch: small, leaky queue keeps UI responsive */ \
-    "t. ! queue name=dw_q  max-size-buffers=2 max-size-bytes=0 max-size-time=0 "  \
-    "leaky=downstream ! valve name=v_dw drop=false ! "  \
-    "glupload ! glcolorconvert ! "  \
-    "glimagesink name=surface_sink_dw  sync=false async=false qos=false "  \
-    /* FMMD preview branch: same idea */ \
-    "t. ! queue name=fmmd_q max-size-buffers=2 max-size-bytes=0 max-size-time=0 " \
-    "leaky=downstream ! valve name=v_fmmd drop=false ! " \
-    "glupload ! glcolorconvert ! " \
-    "glimagesink name=surface_sink_fmmd sync=false async=false qos=false "
-
 /**
  * Have 2 tee line with
  * Queue name for each tee is "tee1", "tee2"
@@ -61,27 +43,40 @@ GST_DEBUG_CATEGORY_STATIC (debug_category);
 #define VSYNC_0 "vsink0"
 #define VSYNC_1 "vsink1"
 #define VALVE   "valve"
-#define MULTI_UDP_SINK "multi_udp_sink"
-#define BROADCAST_UDP_SINK "broadcast_udp_sink"
+#define UDP_VIDEO_SINK "v_udp_sink"
+#define UDP_AUDIO_SINK "a_udp_sink"
 
-#define PIPELINE_DESCRIPTION_NAMI_DVBT2_90 "ahcsrc ! " \
+#define PIPELINE_NAMI_VIDEOTEST "gltestsrc ! glupload ! " \
     /* Raise source framerate cap to 30fps (if camera supports it). */ \
-    "video/x-raw,width=1280,height=720,framerate=30/1 ! "\
     "tee name=t " \
     /* FMMD preview branch: same idea */ \
-    "t. ! queue name=t0 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
-    "videoflip method=clockwise ! " \
-    "glimagesink name="VSYNC_0" " \
+    "t. ! queue name=t0 ! " \
+    "glcolorconvert ! glimagesink name="VSYNC_0" " \
     /* DW preview branch: small, leaky queue keeps UI responsive */ \
-    "t. ! queue name=t1 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
-    "videoflip method=clockwise ! " \
-    "glimagesink name="VSYNC_1" " \
+    "t. ! queue name=t1 ! " \
+    "glcolorconvert ! glimagesink name="VSYNC_1" " \
     /* Multi up sink for the registed ip address */ \
-    "t. ! queue name=t2 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
-    "videoconvert ! x264enc tune=zerolatency ! rtph264pay ! multiudpsink name="MULTI_UDP_SINK" sync=true async=false " \
-    /* Broadcast to udp ip */ \
-    "t. ! queue name=t3 max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! " \
-    "valve name="VALVE" drop=true ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink name="BROADCAST_UDP_SINK
+    "t. ! queue name=t2 ! " \
+    "glcolorconvert ! gldownload ! video/x-raw,format=I420 ! x264enc tune=zerolatency ! rtph264pay ! " \
+    "multiudpsink name="UDP_VIDEO_SINK" sync=true async=false " \
+    "openslessrc ! audioconvert ! voaacenc ! rtpmp4gpay ! "        \
+    "multiudpsink name="UDP_AUDIO_SINK" sync=true async=false "        \
+
+#define PIPELINE_NAMI_DVBT2 "ahcsrc device=0 ! video/x-raw,width=1920,height=1080,framerate=30/1 ! " \
+    /* Raise source framerate cap to 30fps (if camera supports it). */ \
+    "tee name=t " \
+    /* FMMD preview branch: same idea */ \
+    "t. ! queue name=t0 ! " \
+    "videoconvert ! glimagesink name="VSYNC_0" sync=false async=false " \
+    /* DW preview branch: small, leaky queue keeps UI responsive */ \
+    "t. ! queue name=t1 ! " \
+    "videoconvert ! glimagesink name="VSYNC_1" sync=false async=false " \
+    /* Multi up sink for the registed ip address */ \
+    "t. ! queue name=t2 ! " \
+    "videoconvert ! x264enc tune=zerolatency ! rtph264pay ! " \
+    "multiudpsink name="UDP_VIDEO_SINK" sync=true async=false " \
+    "openslessrc ! audioconvert ! voaacenc ! rtpmp4gpay ! " \
+    "multiudpsink name="UDP_AUDIO_SINK" sync=true async=false " \
 
 // GSurface
 #define SURFACE_FMMW 0
@@ -95,6 +90,16 @@ typedef struct _Surface {
     bool active;
 } Surface;
 
+typedef enum _CustomElementEnum {
+    E_CE_UDP_VIDEO_SINK,
+    E_CE_UDP_AUDIO_SINK,
+    E_CE_VALVE,
+    E_CE_VALVE_TRIGGER,
+    E_CE_VSYNC_0,
+    E_CE_VSYNC_1,
+    E_CE_MAX,
+} CustomElementEnum;
+
 /* Structure to contain all our information, so we can pass it to callbacks */
 typedef struct _CustomData
 {
@@ -104,9 +109,9 @@ typedef struct _CustomData
     GMainLoop *main_loop;         /* GLib main loop */
     gboolean initialized;         /* To avoid informing the UI multiple times about the initialization */
     Surface surface[SURFACE_MAX]; /* Application Surfaces List */
-    GstElement *multi_udp_sink;
-    GstElement *broadcast_udp_sink;
-    GstElement *valve_trigger;
+    GstElement *element[E_CE_MAX];
+    gboolean vsink_state[2];
+    gboolean testmode;
 } CustomData;
 
 /* Custom data pointer which will be save from application zone */
@@ -127,12 +132,6 @@ static JNIEnv * get_jni_env (void);
 
 /* Change the content of the UI's TextView */
 static void set_ui_message (const gchar * message, CustomData * data);
-
-/* Change the ui state */
-static void set_ui_state (GstState state, CustomData * data);
-
-/* Change the ui state */
-static void set_ui_state (GstState state, CustomData * data);
 
 /* Retrieve errors from the bus and show them on the UI */
 static void error_cb (GstBus * bus, GstMessage * msg, CustomData * data);
@@ -178,6 +177,10 @@ static void gst_native_remove_client (JNIEnv * env, jobject thiz, jstring ip, ji
 static void gst_native_start_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port);
 
 static void gst_native_stop_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port);
+
+static void gst_native_start_videotestsrc (JNIEnv * env, jobject thiz);
+
+static void gst_native_stop_videotestsrc (JNIEnv * env, jobject thiz);
 
 typedef enum _Method
 {

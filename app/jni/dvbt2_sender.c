@@ -98,13 +98,36 @@ static void error_cb (GstBus * bus, GstMessage * msg, CustomData * data)
 static void state_changed_cb (GstBus * bus, GstMessage * msg, CustomData * data)
 {
     GstState old_state, new_state, pending_state;
-    gst_message_parse_state_changed (msg, &old_state, &new_state, &pending_state);
     /* Only pay attention to messages coming from the pipeline, not its children */
-    if (GST_MESSAGE_SRC (msg) == GST_OBJECT (data->pipeline)) {
-        gchar *message = g_strdup_printf ("State changed to %s", gst_element_state_get_name (new_state));
-        set_ui_message (message, data);
-        set_ui_state(new_state, data);
-        g_free (message);
+    if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STATE_CHANGED) {
+        // State changed
+        gst_message_parse_state_changed (msg, &old_state, &new_state, &pending_state);
+
+        if (GST_MESSAGE_SRC (msg) == GST_OBJECT (data->pipeline)) {
+            gchar *message = g_strdup_printf ("Pipeline state [%s] -> [%s] : {%s}",
+                                              gst_element_state_get_name (old_state),
+                                              gst_element_state_get_name (new_state),
+                                              gst_element_state_get_name (pending_state));
+            set_ui_state(new_state, data);
+            g_free (message);
+        } else {
+            // GST_DEBUG ("Object state [%s] :: [%s] -> [%s] : {%s}",
+            //            GST_OBJECT_NAME(GST_MESSAGE_SRC(msg)),
+            //            gst_element_state_get_name (old_state),
+            //            gst_element_state_get_name (new_state),
+            //            gst_element_state_get_name (pending_state));
+            if(GST_MESSAGE_SRC(msg) == GST_OBJECT (data->element[E_CE_VSYNC_0])) {
+                data->vsink_state[0] = new_state;
+                if((GST_STATE_PLAYING == data->vsink_state[0]) && (GST_STATE_PLAYING == data->vsink_state[1]))
+                    set_ui_state(GST_STATE_PLAYING, data);
+            }
+            if(GST_MESSAGE_SRC(msg) == GST_OBJECT (data->element[E_CE_VSYNC_1])) {
+                data->vsink_state[1] = new_state;
+                if((GST_STATE_PLAYING == data->vsink_state[0]) && (GST_STATE_PLAYING == data->vsink_state[1]))
+                    set_ui_state(GST_STATE_PLAYING, data);
+            }
+
+        }
     }
 }
 
@@ -119,8 +142,8 @@ static void check_initialization_complete (CustomData * data)
             if(data->surface[id].native_window) {
                 GST_DEBUG ("Initialization complete, notifying application. native_window:%p main_loop:%p", data->surface[id].native_window, data->main_loop);
                 gst_video_overlay_set_window_handle (GST_VIDEO_OVERLAY (data->surface[id].video_sink), (guintptr) data->surface[id].native_window);
+                data->initialized = TRUE;
             }
-            data->initialized = TRUE;
         }
 
         if(data->initialized) {
@@ -130,7 +153,7 @@ static void check_initialization_complete (CustomData * data)
             }
         }
     } else {
-        GST_DEBUG ("Initialization failed [%d][%d][%d]", data->initialized, data->surface[SURFACE_FMMW].native_window, data->main_loop);
+        GST_ERROR("Initialization failed [%d][%d][%d]", data->initialized, data->surface[SURFACE_FMMW].native_window, data->main_loop);
     }
 }
 
@@ -150,8 +173,15 @@ static void * app_function (void *userdata)
     g_main_context_push_thread_default (data->context);
 
     /* Build pipeline */
-    // data->pipeline = gst_parse_launch (PIPELINE_DESCRIPTION_EXAMPLE_90, &error);
-    data->pipeline = gst_parse_launch (PIPELINE_DESCRIPTION_NAMI_DVBT2_90, &error);
+    // data->pipeline = gst_parse_launch (PIPELINE_NAMI_VIDEOTEST, &error);
+
+    if(data->testmode) {
+        GST_DEBUG ("PIPELINE: "PIPELINE_NAMI_VIDEOTEST);
+        data->pipeline = gst_parse_launch (PIPELINE_NAMI_VIDEOTEST, &error);
+    } else {
+        GST_DEBUG ("PIPELINE: "PIPELINE_NAMI_DVBT2);
+        data->pipeline = gst_parse_launch (PIPELINE_NAMI_DVBT2, &error);
+    }
 
     if (error) {
         gchar *message = g_strdup_printf ("Unable to build pipeline: %s", error->message);
@@ -162,16 +192,15 @@ static void * app_function (void *userdata)
     }
 
     /* Init Pipeline */
-    data->multi_udp_sink = gst_bin_get_by_name(GST_BIN(data->pipeline), MULTI_UDP_SINK);
-    // Initialize with a blank client list
-    g_object_set(G_OBJECT(data->multi_udp_sink), "clients", "", NULL);
+    data->element[E_CE_UDP_VIDEO_SINK] = gst_bin_get_by_name(GST_BIN(data->pipeline), UDP_VIDEO_SINK);
+    data->element[E_CE_UDP_AUDIO_SINK] = gst_bin_get_by_name(GST_BIN(data->pipeline), UDP_AUDIO_SINK);
 
-    data->valve_trigger = gst_bin_get_by_name(GST_BIN(data->pipeline), VALVE);
-    g_object_set(G_OBJECT(data->broadcast_udp_sink), "drop", "", TRUE);
-
-    data->broadcast_udp_sink = gst_bin_get_by_name(GST_BIN(data->pipeline), BROADCAST_UDP_SINK);
-    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", "", "port", 0, NULL);
-
+    data->element[E_CE_VALVE] = gst_bin_get_by_name(GST_BIN(data->pipeline), VALVE);
+    g_object_set(G_OBJECT(data->element[E_CE_VALVE_TRIGGER]), "drop", TRUE, NULL);
+    data->element[E_CE_VSYNC_0] = gst_bin_get_by_name(GST_BIN(data->pipeline), VSYNC_0);
+    data->element[E_CE_VSYNC_1] = gst_bin_get_by_name(GST_BIN(data->pipeline), VSYNC_1);
+    data->vsink_state[0] = false;
+    data->vsink_state[0] = false;
 
     /* Set the pipeline to READY, so it can already accept a window handle, if we have one */
     gst_element_set_state (data->pipeline, GST_STATE_READY);
@@ -212,8 +241,10 @@ static void * app_function (void *userdata)
     gst_element_set_state (data->pipeline, GST_STATE_NULL);
     gst_object_unref (data->surface[SURFACE_DW].video_sink);
     gst_object_unref (data->surface[SURFACE_FMMW].video_sink);
+    for (int ce_item = 0; ce_item < E_CE_MAX; ++ce_item) {
+        gst_object_unref(data->element[ce_item]);
+    }
     gst_object_unref (data->pipeline);
-
     return NULL;
 }
 
@@ -226,11 +257,25 @@ static void gst_native_init (JNIEnv * env, jobject thiz)
 {
     CustomData *data = g_new0 (CustomData, 1);
     SET_CUSTOM_DATA (env, thiz, custom_data_field_id, data);
-    GST_DEBUG_CATEGORY_INIT (debug_category, TAG, 0, "Android tutorial 3");
+    GST_DEBUG_CATEGORY_INIT (debug_category, TAG, 0, "DVBT2-SENDER");
+    // change log level for debug
+    gst_debug_set_default_threshold(GST_LEVEL_ERROR);
+    // set level debug for app
     gst_debug_set_threshold_for_name (TAG, GST_LEVEL_DEBUG);
     GST_DEBUG ("Created CustomData at %p", data);
     data->app = (*env)->NewGlobalRef (env, thiz);
     GST_DEBUG ("Created GlobalRef for app object at %p", data->app);
+    data->initialized = FALSE;
+    data->main_loop = NULL;
+    for (int e_id = 0; e_id < E_CE_MAX; ++ e_id) {
+        data->element[e_id] = NULL;
+    }
+    data->surface[SURFACE_FMMW].native_window = NULL;
+    data->surface[SURFACE_DW].native_window = NULL;
+    data->vsink_state[0] = FALSE;
+    data->vsink_state[1] = FALSE;
+    data->testmode = FALSE;
+    GST_DEBUG ("Init/Preset few data");
     pthread_create (&gst_app_thread, NULL, &app_function, data);
 }
 
@@ -357,7 +402,9 @@ static void gst_native_add_client (JNIEnv * env, jobject thiz, jstring ip, jint 
         return;
 
     const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
-    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "add", _ip, port);
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_VIDEO_SINK]), "add", _ip, port);
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_AUDIO_SINK]), "add", _ip, port+1);
+    GST_DEBUG ("Add Client: %s:%d", _ip, port);
     (*env)->ReleaseStringUTFChars(env, ip, _ip);
 }
 
@@ -368,7 +415,9 @@ static void gst_native_remove_client (JNIEnv * env, jobject thiz, jstring ip, ji
         return;
 
     const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
-    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "remove", _ip, port);
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_VIDEO_SINK]), "remove", _ip, port);
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_AUDIO_SINK]), "remove", _ip, port+1);
+    GST_DEBUG ("Remove Client: %s:%d", _ip, port);
     (*env)->ReleaseStringUTFChars(env, ip, _ip);
 }
 
@@ -379,7 +428,8 @@ static void gst_native_clear_all_client (JNIEnv * env, jobject thiz)
     if (!data)
         return;
 
-    g_signal_emit_by_name(G_OBJECT(data->multi_udp_sink), "clear");
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_VIDEO_SINK]), "clear");
+    g_signal_emit_by_name(G_OBJECT(data->element[E_CE_UDP_AUDIO_SINK]), "clear");
 }
 
 static void gst_native_start_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port)
@@ -389,11 +439,7 @@ static void gst_native_start_broadcast (JNIEnv * env, jobject thiz, jstring ip, 
         return;
 
     // Set ip
-    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
-    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", _ip, "port", port, NULL);
-    // Enable stream (turn on)
-    g_object_set(G_OBJECT(data->valve_trigger), "drop", FALSE, NULL);
-    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+    GST_DEBUG ("Feature not ready");
 }
 
 static void gst_native_stop_broadcast (JNIEnv * env, jobject thiz, jstring ip, jint port)
@@ -403,29 +449,58 @@ static void gst_native_stop_broadcast (JNIEnv * env, jobject thiz, jstring ip, j
         return;
 
     // disable stream (turn off)
-    const char *_ip = (*env)->GetStringUTFChars(env, ip, NULL);
-    g_object_set(G_OBJECT(data->valve_trigger), "drop", TRUE, NULL);
-    // Remove ip addrest
-    g_object_set(G_OBJECT(data->broadcast_udp_sink), "host", _ip, "port", port, NULL);
-    (*env)->ReleaseStringUTFChars(env, ip, _ip);
+    GST_DEBUG ("Feature not ready");
 }
 
+static void gst_native_start_videotestsrc (JNIEnv * env, jobject thiz)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    GST_DEBUG ("Stop <gst_app_thread> main loop...");
+    g_main_loop_quit (data->main_loop);
+    GST_DEBUG ("Waiting for thread to finish...");
+    pthread_join (gst_app_thread, NULL);
+    GST_DEBUG ("Enable test mode...");
+    data->testmode = TRUE;
+    GST_DEBUG ("Restart <gst_app_thread>");
+    pthread_create (&gst_app_thread, NULL, &app_function, data);
+}
+
+static void gst_native_stop_videotestsrc (JNIEnv * env, jobject thiz)
+{
+    CustomData *data = GET_CUSTOM_DATA (env, thiz, custom_data_field_id);
+    if (!data)
+        return;
+
+    GST_DEBUG ("Stop <gst_app_thread> main loop...");
+    g_main_loop_quit (data->main_loop);
+    GST_DEBUG ("Waiting for thread to finish...");
+    pthread_join (gst_app_thread, NULL);
+    GST_DEBUG ("Disable test mode...");
+    data->testmode = FALSE;
+    GST_DEBUG ("Restart <gst_app_thread>");
+    pthread_create (&gst_app_thread, NULL, &app_function, data);
+}
 /*
  * List of implemented native methods
  * */
 static JNINativeMethod native_methods[] = {
-    {"nativeInit", "()V", (void *) gst_native_init},
-    {"nativeFinalize", "()V", (void *) gst_native_finalize},
-    {"nativePlay", "()V", (void *) gst_native_play},
-    {"nativePause", "()V", (void *) gst_native_pause},
-    {"nativeSurfaceInit", "(ILjava/lang/Object;)V", (void *) gst_native_surface_init},
-    {"nativeSurfaceFinalize", "(I)V", (void *) gst_native_surface_finalize},
-    {"nativeClassInit", "()Z", (void *) gst_native_class_init},
-    {"nativeAddClient", "(Ljava/lang/String;I)V", (void *) gst_native_add_client},
-    {"nativeRemoveClient", "(Ljava/lang/String;I)V", (void *) gst_native_remove_client},
-    {"nativeClearAllClient", "()V", (void *) gst_native_clear_all_client},
-    {"nativeStartBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_start_broadcast},
-    {"nativeStopBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_stop_broadcast}
+        {"nativeInit", "()V", (void *) gst_native_init},
+        {"nativeFinalize", "()V", (void *) gst_native_finalize},
+        {"nativePlay", "()V", (void *) gst_native_play},
+        {"nativePause", "()V", (void *) gst_native_pause},
+        {"nativeSurfaceInit", "(ILjava/lang/Object;)V", (void *) gst_native_surface_init},
+        {"nativeSurfaceFinalize", "(I)V", (void *) gst_native_surface_finalize},
+        {"nativeClassInit", "()Z", (void *) gst_native_class_init},
+        {"nativeAddClient", "(Ljava/lang/String;I)V", (void *) gst_native_add_client},
+        {"nativeRemoveClient", "(Ljava/lang/String;I)V", (void *) gst_native_remove_client},
+        {"nativeClearAllClient", "()V", (void *) gst_native_clear_all_client},
+        {"nativeStartBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_start_broadcast},
+        {"nativeStopBroadcast", "(Ljava/lang/String;I)V", (void *) gst_native_stop_broadcast},
+        {"nativeStartVideoTest", "()V", (void *) gst_native_start_videotestsrc},
+        {"nativeStopVideoTest", "()V", (void *) gst_native_stop_videotestsrc},
 };
 
 /* Library initializer */

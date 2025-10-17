@@ -11,30 +11,33 @@ import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.widget.ToggleButton
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.freedesktop.gstreamer.GStreamer
+import org.freedesktop.gstreamer.GStreamerSurfaceView
 import nami.example.dtvbt2.DvbSenderManagerCallback
 
 class MainActivity : Activity(), DvbSenderManagerCallback {
     private var isPlayingDesired = false // Whether the user asked to go to PLAYING
     private val TAG: String = "MainActivity" // Whether the user asked to go to PLAYING"
+    private val BROADCASTRECEIVER_ACTION_ID_STRING = "nami.example.dtvbt2.broadcastreceiver"
     private val CAMERA_PERMISSION_CODE = 100
+    private val RECORD_AUDIO_CODE = 1
     private val dvbSenderManager: DvbSenderManager = DvbSenderManager(this)
     private var mBtnPlay: ImageButton? = null;
     private var mBtnPause: ImageButton? = null;
 
     // Check Camera Permission
-
     private fun checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
 
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.CAMERA),
-                CAMERA_PERMISSION_CODE
-            )
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_CODE)
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), RECORD_AUDIO_CODE)
         } else {
             // Permission already granted
             startCamera()
@@ -52,6 +55,9 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
                 startCamera()
             } else {
                 Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Record audio permission denied", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -76,9 +82,11 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         var btn_dev_0 = findViewById<View>(R.id.button_dev_0) as ToggleButton
         btn_dev_0.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                dvbSenderManager.connectTablet("192.168.10.106", 5000)
+                Log.d(TAG, "initButton: CONNECT << 192.168.10.126:5000 >>")
+                dvbSenderManager.connectTablet("192.168.10.126", 5000)
             } else {
-                dvbSenderManager.disconnectTablet("192.168.10.106", 5000)
+                Log.d(TAG, "initButton: DISCONNECT << 192.168.10.126:5000 >>")
+                dvbSenderManager.disconnectTablet("192.168.10.126", 5000)
             }
         }
 
@@ -88,9 +96,11 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         var btn_dev_1 = findViewById<View>(R.id.button_dev_1) as ToggleButton
         btn_dev_1.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                dvbSenderManager.connectTablet("192.168.10.105", 5000)
+                Log.d(TAG, "initButton: CONNECT << 192.168.10.130:5000 >>")
+                dvbSenderManager.connectTablet("192.168.10.130", 5000)
             } else {
-                dvbSenderManager.disconnectTablet("192.168.10.105", 5000)
+                Log.d(TAG, "initButton: DISCONNECT << 192.168.10.130:5000 >>")
+                dvbSenderManager.disconnectTablet("192.168.10.130", 5000)
             }
         }
 
@@ -108,7 +118,7 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
     }
 
     private fun initSurfaceView() {
-        val svf = findViewById<View>(R.id.surface_fmmd) as SurfaceView
+        val svf = findViewById<View>(R.id.surface_fmmd) as GStreamerSurfaceView
         svf.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
             }
@@ -122,18 +132,18 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
                 dvbSenderManager.surfaceFinalize(DvbSenderManager.SURFACE_FMMW)
             }
         })
-        val svd = findViewById<View>(R.id.surface_dw) as SurfaceView
+        val svd = findViewById<View>(R.id.surface_dw) as GStreamerSurfaceView
         svd.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                 // Handle size or format changes if needed
-                dvbSenderManager.setSurface(DvbSenderManager.SURFACE_DW, holder, format, width, height)
+                 dvbSenderManager.setSurface(DvbSenderManager.SURFACE_DW, holder, format, width, height)
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
-                dvbSenderManager.surfaceFinalize(DvbSenderManager.SURFACE_DW)
+                 dvbSenderManager.surfaceFinalize(DvbSenderManager.SURFACE_DW)
             }
         })
     }
@@ -154,7 +164,9 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         checkCameraPermission()
         setContentView(R.layout.activity_main)
         initButton()
-        initSurfaceView()
+        registerReceiver()
+
+        dvbSenderManager.init();
 
         if (savedInstanceState != null) {
             isPlayingDesired = savedInstanceState.getBoolean("playing")
@@ -168,7 +180,7 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
         mBtnPlay?.isEnabled = false
         mBtnPause?.isEnabled = false
 
-        dvbSenderManager.init();
+        initSurfaceView()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -178,6 +190,7 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
 
     override fun onDestroy() {
         dvbSenderManager.finalize()
+        unregisterReceiver()
         super.onDestroy()
     }
 
@@ -228,4 +241,43 @@ class MainActivity : Activity(), DvbSenderManagerCallback {
             }
         }
     }
+
+    private val mReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action = intent.action
+            Log.d(TAG,"onReceive action: $action")
+            // Broadcast receiver for test
+            if (BROADCASTRECEIVER_ACTION_ID_STRING == action) {
+                val action_id:Int = intent.getIntExtra("action_id", 0)
+
+                when (action_id) {
+                    DvbSenderManager.ACTION_ID_CALL_PLAY -> dvbSenderManager.callPlay()
+                    DvbSenderManager.ACTION_ID_CALL_PAUSE -> dvbSenderManager.callPause()
+                    DvbSenderManager.ACTION_ID_CALL_ADD_TABLET -> {
+                        dvbSenderManager.connectTablet(intent.getStringExtra("ip"), intent.getIntExtra("port", 5000))
+                    }
+                    DvbSenderManager.ACTION_ID_CALL_REMOVE_TABLET -> {
+                        dvbSenderManager.disconnectTablet(intent.getStringExtra("ip"), intent.getIntExtra("port", 5000))
+                    }
+                    DvbSenderManager.ACTION_ID_CALL_BROADCAST -> {
+                        dvbSenderManager.startBroadcast(intent.getStringExtra("ip"), intent.getIntExtra("port", 5000))
+                    }
+                    DvbSenderManager.ACTION_ID_CALL_ENABLE_VIDEOTEST -> dvbSenderManager.startTestMode()
+                    DvbSenderManager.ACTION_ID_CALL_DISABLE_VIDEOTEST -> dvbSenderManager.stopTestMode()
+                    else -> { /* do nothing */ }
+                }
+            }
+        }
+    }
+
+    private fun registerReceiver() {
+        val filter = IntentFilter()
+        filter.addAction(BROADCASTRECEIVER_ACTION_ID_STRING)
+        registerReceiver(mReceiver, filter)
+    }
+
+    private fun unregisterReceiver() {
+        unregisterReceiver(mReceiver)
+    }
+
 }

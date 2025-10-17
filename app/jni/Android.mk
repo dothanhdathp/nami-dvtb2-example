@@ -33,5 +33,5 @@ include $(GSTREAMER_NDK_BUILD_PATH)/plugins.mk
 GSTREAMER_EXTRA_LIBS      := -liconv
 GSTREAMER_PLUGINS         := $(GSTREAMER_PLUGINS_CORE) $(GSTREAMER_PLUGINS_PLAYBACK) $(GSTREAMER_PLUGINS_SYS) $(GSTREAMER_PLUGINS_CODECS) $(GSTREAMER_PLUGINS_CODECS_RESTRICTED) $(GSTREAMER_PLUGINS_NET)
 G_IO_MODULES              := openssl
-GSTREAMER_EXTRA_DEPS      := gstreamer-video-1.0 glib-2.0 gstreamer-app-1.0
+GSTREAMER_EXTRA_DEPS      := gstreamer-video-1.0 glib-2.0 gstreamer-app-1.0 gobject-2.0
 include $(GSTREAMER_NDK_BUILD_PATH)/gstreamer-1.0.mk
